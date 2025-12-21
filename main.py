@@ -1,86 +1,99 @@
 import asyncio
 import random
-from agent import TreeAgent
-from graph_utils import create_random_graph, build_spanning_tree
+import time
+from agent import LVPAgent
+from graph_utils import create_random_graph
+from config import MAX_ITERATIONS
 
+NUM_AGENTS = 15
+XMPP_SERVER = "localhost"
 
 async def main():
-    random.seed(42)
-    
-    NUM_AGENTS = 15
-    
     print("=" * 60)
-    print("МУЛЬТИАГЕНТНАЯ СИСТЕМА С MST")
+    print("МУЛЬТИАГЕНТНАЯ СИСТЕМА С LVP (Local Voting Protocol)")
     print("=" * 60)
     
-    # Генерируем числа для агентов
     numbers = [random.randint(1, 100) for _ in range(NUM_AGENTS)]
     expected_avg = sum(numbers) / len(numbers)
     
-    print(f"\nЧисла агентов: {numbers}")
+    print(f"Числа агентов: {numbers}")
     print(f"Ожидаемое среднее: {expected_avg:.4f}")
-    print(f"Сумма: {sum(numbers)}, Количество: {len(numbers)}")
     
-    # Создаем граф и остовное дерево
+    # 1. Создаем граф коммуникаций
     edges = create_random_graph(NUM_AGENTS)
-    children, parent = build_spanning_tree(NUM_AGENTS, edges)
     
-    print(f"\nСтруктура дерева (parent -> children):")
+    # Преобразуем список ребер в список соседей для каждого агента
+    neighbors = [[] for _ in range(NUM_AGENTS)]
+    for u, v in edges:
+        if v not in neighbors[u]: neighbors[u].append(v)
+        if u not in neighbors[v]: neighbors[v].append(u)
+    
+    print("\nГраф коммуникаций (соседи):")
     for i in range(NUM_AGENTS):
-        if children[i]:
-            print(f"  Agent{i} -> {['Agent'+str(c) for c in children[i]]}")
+        print(f"  Agent{i}: {neighbors[i]}")
+    
+    # 2. Создаем агентов
+    agents = []
+    for i in range(NUM_AGENTS):
+        jid = f"agent{i}@{XMPP_SERVER}"
+        agent = LVPAgent(jid, f"pass{i}", numbers[i], i)
+        agents.append(agent)
+    
+    # 3. Конфигурируем агентов (раздаем соседей)
+    for i in range(NUM_AGENTS):
+        neighbors_jids = [f"agent{n}@{XMPP_SERVER}" for n in neighbors[i]]
+        agents[i].configure(neighbors_jids)
     
     print("\n" + "=" * 60)
     print("ЗАПУСК АГЕНТОВ")
-    print("=" * 60 + "\n")
-    
-    # Создаем агентов
-    agents = []
-    for i in range(NUM_AGENTS):
-        jid = f"agent{i}@localhost"
-        agent = TreeAgent(jid, f"pass{i}", numbers[i], i)
-        agents.append(agent)
+    print("=" * 60)
     
     # Запускаем агентов
     for agent in agents:
         await agent.start()
     
-    # Конфигурируем топологию
-    for i in range(NUM_AGENTS):
-        parent_jid = f"agent{parent[i]}@localhost" if parent[i] != -1 else None
-        children_jids = [f"agent{c}@localhost" for c in children[i]]
-        is_root = (parent[i] == -1)
-        agents[i].configure(parent_jid, children_jids, is_root)
+    # Ждем завершения (пока все не выполнят MAX_ITERATIONS)
+    # Или просто ждем фиксированное время, так как LVP асимптотический
     
-    # Ждем завершения
-    timeout = 30
-    for _ in range(timeout * 2):
-        if all(a.done for a in agents):
+    wait_time = 20 # секунд
+    print(f"Ждем сходимости ({wait_time} сек)...")
+    
+    # Можно мониторить состояние
+    for _ in range(wait_time):
+        all_done = all(a.done for a in agents)
+        if all_done:
             break
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1)
     
     # Результаты
     print("\n" + "=" * 60)
-    print("РЕЗУЛЬТАТЫ")
+    print("РЕЗУЛЬТАТЫ LVP")
     print("=" * 60)
     
-    root = agents[0]
-    if root.final_result:
-        print(f"Вычисленное среднее: {root.final_result:.4f}")
-        print(f"Ожидаемое среднее:   {expected_avg:.4f}")
+    print(f"Ожидаемое среднее:   {expected_avg:.4f}")
     
-    total_cost = sum(a.cost for a in agents)
-    print(f"\n--- Стоимость по агентам ---")
-    for a in agents:
-        print(f"Agent{a.agent_id}: {a.cost:.2f}")
+    total_cost = 0
+    final_values = []
     
-    print(f"\nОБЩАЯ СТОИМОСТЬ: {total_cost:.2f}")
+    print("\n--- Итоговые значения и стоимость ---")
+    for i, agent in enumerate(agents):
+        val = agent.current_value
+        final_values.append(val)
+        cost = agent.cost
+        total_cost += cost
+        
+        diff = abs(val - expected_avg)
+        print(f"Agent{i}: Val={val:.4f} (Err={diff:.4f}), Cost={cost:.2f}, Iters={agent.iteration}")
+    
+    avg_result = sum(final_values) / len(final_values)
+    print(f"\nСреднее по всем агентам: {avg_result:.4f}")
+    print(f"ОБЩАЯ СТОИМОСТЬ: {total_cost:.2f}")
     print("=" * 60)
     
     # Останавливаем агентов
     for agent in agents:
         await agent.stop()
 
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    import spade
+    spade.run(main())
