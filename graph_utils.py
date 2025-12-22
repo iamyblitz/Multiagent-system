@@ -18,27 +18,3 @@ def create_random_graph(n):
     
     return edges
 
-
-def build_spanning_tree(n, edges):
-    """Строит остовное дерево из графа с помощью DFS"""
-    adj = [[] for _ in range(n)]
-    for u, v in edges:
-        adj[u].append(v)
-        adj[v].append(u)
-    
-    visited = [False] * n
-    parent = [-1] * n
-    children = [[] for _ in range(n)]
-    
-    def dfs(node, par):
-        visited[node] = True
-        parent[node] = par
-        
-        for neighbor in adj[node]:
-            if not visited[neighbor]:
-                children[node].append(neighbor)
-                dfs(neighbor, node)
-    
-    dfs(0, -1)
-    
-    return children, parent
